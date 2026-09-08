@@ -16,6 +16,8 @@ interface Props {
   onChallengeStop?: () => void;
   /** Called synchronously when a difficulty pill is clicked, so parent can update slider values. */
   onDifficultyChange?: (d: Difficulty) => void;
+  /** Called when the Auto Mode language selector changes, so parent can sync the code editor. */
+  onLanguageChange?: (language: string) => void;
 }
 
 const SNIPPET_LANGS: { value: SnippetLang; label: string }[] = [
@@ -53,7 +55,7 @@ function formatTimer(seconds: number): string {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function ChallengeHeader({ onStartChallenge, challengeActive = false, onChallengeStop, onDifficultyChange }: Props) {
+export default function ChallengeHeader({ onStartChallenge, challengeActive = false, onChallengeStop, onDifficultyChange, onLanguageChange }: Props) {
   const {
     mode,
     difficulty,
@@ -305,8 +307,10 @@ export default function ChallengeHeader({ onStartChallenge, challengeActive = fa
                 <select
                   value={autoLang ?? ""}
                   onChange={(e) => {
-                    setAutoLang(e.target.value as SnippetLang);
-                    setScenarioIdx(Math.floor(Math.random() * SCENARIO_POOL[e.target.value as SnippetLang].length));
+                    const lang = e.target.value as SnippetLang;
+                    setAutoLang(lang);
+                    setScenarioIdx(Math.floor(Math.random() * SCENARIO_POOL[lang].length));
+                    onLanguageChange?.(lang);
                   }}
                   className="rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-[11px] text-zinc-800 dark:text-zinc-200 outline-none focus:border-sky-500"
                 >

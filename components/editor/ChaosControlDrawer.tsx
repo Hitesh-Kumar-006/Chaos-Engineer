@@ -13,6 +13,8 @@ interface Props {
   config: ChaosConfig;
   onConfigChange: (cfg: ChaosConfig) => void;
   rightOffset?: string;
+  open?: boolean;
+  onToggle?: (open: boolean) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -153,8 +155,14 @@ function SliderCol({
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function ChaosControlDrawer({ config, onConfigChange, rightOffset = "0px" }: Props) {
-  const [open, setOpen] = useState(true);
+export default function ChaosControlDrawer({ config, onConfigChange, rightOffset = "0px", open: controlledOpen, onToggle }: Props) {
+  const [internalOpen, setInternalOpen] = useState(true);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const handleToggle = () => {
+    const next = !open;
+    if (onToggle) onToggle(next);
+    else setInternalOpen(next);
+  };
   const { difficulty } = useGameEngine();
   const isChaosMode = difficulty === "chaos";
   const isModerateMode = difficulty === "moderate";
@@ -172,7 +180,7 @@ export default function ChaosControlDrawer({ config, onConfigChange, rightOffset
     <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
       {/* Toggle tab */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleToggle}
         className="flex h-8 w-full items-center justify-center gap-2 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 transition hover:text-zinc-900 dark:hover:text-zinc-100"
       >
         {open ? "Chaos Matrix" : "\u25B8 Chaos Matrix"}

@@ -57,6 +57,7 @@ export default function Home() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [blameLines, setBlameLines] = useState<number[]>([]);
   const [lastChaosReport, setLastChaosReport] = useState<ChaosReport | null>(null);
+  const [chaosMatrixOpen, setChaosMatrixOpen] = useState(true);
   const [code, setCode] = useState(`function executePipeline() {
     console.log("System initialized.");
 }
@@ -206,6 +207,11 @@ executePipeline();`);
       if (saved) setChaosConfig((prev) => ({ ...prev, ...saved }));
     });
   }, []);
+
+  /* ---- Collapse Chaos Matrix drawer when Auto Mode activates ------ */
+  useEffect(() => {
+    if (mode === "auto_chaos") setChaosMatrixOpen(false);
+  }, [mode]);
 
   /* ---- Sync difficulty pills → slider positions (explicit callback) */
   const handleDifficultyChange = useCallback((d: "mild" | "moderate" | "chaos") => {
@@ -464,6 +470,7 @@ executePipeline();`);
                   challengeActive={challengeActive}
                   onChallengeStop={() => setChallengeActive(false)}
                   onDifficultyChange={handleDifficultyChange}
+                  onLanguageChange={(language) => setLang(language as EditorLanguage)}
                   onStartChallenge={(language, starterCode, title) => {
                     setLang(language as EditorLanguage);
                     setCode(starterCode);
@@ -499,6 +506,8 @@ executePipeline();`);
                 <ChaosControlDrawer
                   config={chaosConfig}
                   onConfigChange={setChaosConfig}
+                  open={chaosMatrixOpen}
+                  onToggle={setChaosMatrixOpen}
                 />
               </PaneErrorBoundary>
 

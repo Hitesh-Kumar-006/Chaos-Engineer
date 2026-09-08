@@ -1,17 +1,7 @@
 "use client";
 
-import { useAuth, type Role } from "@/context/AuthContext";
+import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-
-/* ------------------------------------------------------------------ */
-/*  Role badge styling                                                  */
-/* ------------------------------------------------------------------ */
-
-const roleStyles: Record<Role, string> = {
-  Junior: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-emerald-500/30",
-  SRE: "bg-sky-500/15 text-sky-600 dark:text-sky-400 ring-sky-500/30",
-  "Chaos Engineer": "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/30",
-};
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -38,11 +28,6 @@ export default function Header() {
         </div>
         <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
           {user.username}
-        </span>
-        <span
-          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${roleStyles[user.role]}`}
-        >
-          {user.role}
         </span>
       </div>
 
