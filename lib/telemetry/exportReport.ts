@@ -271,7 +271,8 @@ function toMarkdown(report: PostMortemReport): string {
 
 /**
  * Trigger a browser download for the JSON report.
- * Only works in a browser environment.
+ * Only works in a browser environment. Silently degrades in
+ * sandboxed/headless contexts where Blob or DOM APIs are unavailable.
  */
 export function downloadJSON(
   bundle: ExportBundle,
@@ -284,7 +285,8 @@ export function downloadJSON(
 
 /**
  * Trigger a browser download for the Markdown report.
- * Only works in a browser environment.
+ * Only works in a browser environment. Silently degrades in
+ * sandboxed/headless contexts where Blob or DOM APIs are unavailable.
  */
 export function downloadMarkdown(
   bundle: ExportBundle,
@@ -300,14 +302,30 @@ function downloadBlob(
   filename: string,
   mimeType: string,
 ): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  try {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    /* Sandboxed iframe, headless env, or restricted CSP — fall back to
+       copying content to clipboard so the user can paste manually. */
+    console.warn("[export] Blob download failed, attempting clipboard fallback:", err);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(content).then(
+          () => console.info("[export] Report copied to clipboard."),
+          () => console.warn("[export] Clipboard write also failed."),
+        );
+      }
+    } catch {
+      console.warn("[export] Clipboard API unavailable. Report data lost.");
+    }
+  }
 }

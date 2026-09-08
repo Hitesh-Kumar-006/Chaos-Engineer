@@ -13,7 +13,7 @@ interface Props {
 }
 
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "error";
   content: string;
   timestamp: Date;
 }
@@ -29,12 +29,39 @@ const AUTO_PROMPT =
 const GREETING_TEXT =
   "Welcome to Chaos Engineering! I'm Chaos, your dedicated Code Tutor and Software Architecture Advisor.";
 
+/** Map HTTP status codes to user-friendly error messages. */
+function friendlyError(status: number, data: Record<string, unknown>): string {
+  /* Structured error from our hardened API routes */
+  const detail = typeof data.detail === "string" ? data.detail : null;
+  const hint = typeof data.hint === "string" ? data.hint : null;
+  const missingVar = typeof data.missingVar === "string" ? data.missingVar : null;
+
+  if (status === 503) {
+    if (missingVar) {
+      return `The Copilot service is not configured yet. The \`${missingVar}\` environment variable is missing.\n\n${hint ?? "Ask your administrator to set it in .env.local and restart the server."}`;
+    }
+    return detail ?? "The Copilot AI service is temporarily unavailable. Please try again shortly.";
+  }
+  if (status === 502) {
+    return "The upstream AI model returned an error. This usually means the service is overloaded — try again in a moment.";
+  }
+  if (status === 400) {
+    return typeof data.error === "string" ? data.error : "The request was malformed. Please rephrase your question.";
+  }
+  if (status === 429) {
+    return "You've sent too many messages in a short time. Please wait a few seconds before trying again.";
+  }
+  if (status >= 500) {
+    return "The Copilot service encountered an unexpected error. The development team has been notified.";
+  }
+  return typeof data.error === "string" ? data.error : `Unexpected response (HTTP ${status}).`;
+}
+
 export default function SreCopilotDrawer({ chaosConfig, currentCode, language, externalInsight }: Props) {
   const { difficulty, streakCount, currentChallenge } = useGameEngine();
 
   const [open, setOpen] = useState(false);
-  
-  // Initialize messages directly with the greeting so it shows up fresh upon every login/page load
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
@@ -61,8 +88,12 @@ export default function SreCopilotDrawer({ chaosConfig, currentCode, language, e
       { role: "assistant", content: externalInsight, timestamp: new Date() },
     ]);
     setUnread((u) => u + 1);
-    // Panel stays closed — the parent shows a toast notification instead
   }, [externalInsight]);
+
+  const pushMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => [...prev, msg]);
+    setUnread((u) => u + 1);
+  }, []);
 
   const sendMessage = useCallback(
     async (userText: string, proactiveExplainer = false) => {
@@ -110,32 +141,42 @@ export default function SreCopilotDrawer({ chaosConfig, currentCode, language, e
           }),
         });
 
-        const data = await response.json();
-
-        if (data.error) {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `**Error:** ${data.error}`, timestamp: new Date() },
-          ]);
-          setUnread((u) => u + 1);
-        } else {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: data.reply, timestamp: new Date() },
-          ]);
-          setUnread((u) => u + 1);
+        /* ---- Safely parse the response body ---- */
+        let data: Record<string, unknown> = {};
+        try {
+          data = await response.json();
+        } catch {
+          /* Non-JSON body (e.g., proxy error page) */
         }
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "**Error:** Failed to reach the Chaos Copilot service.", timestamp: new Date() },
-        ]);
-        setUnread((u) => u + 1);
+
+        if (!response.ok) {
+          const message = friendlyError(response.status, data);
+          pushMessage({ role: "error", content: message, timestamp: new Date() });
+          return;
+        }
+
+        /* Successful response */
+        const reply = typeof data.reply === "string" ? data.reply : "";
+        if (reply) {
+          pushMessage({ role: "assistant", content: reply, timestamp: new Date() });
+        } else {
+          pushMessage({ role: "error", content: "The Copilot returned an empty response. Please try rephrasing your question.", timestamp: new Date() });
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : "Unknown error";
+        const isNetwork = detail.includes("fetch") || detail.includes("NetworkError") || detail.includes("Failed to fetch");
+        pushMessage({
+          role: "error",
+          content: isNetwork
+            ? "Could not connect to the Copilot service. Check your internet connection or that the dev server is running."
+            : `Something went wrong: ${detail}`,
+          timestamp: new Date(),
+        });
       } finally {
         setLoading(false);
       }
     },
-    [loading, messages, currentChallenge, difficulty, currentCode, language, chaosConfig],
+    [loading, messages, currentChallenge, difficulty, currentCode, language, chaosConfig, pushMessage],
   );
 
   useEffect(() => {
@@ -219,9 +260,21 @@ export default function SreCopilotDrawer({ chaosConfig, currentCode, language, e
           <div ref={scrollRef} className="h-[380px] space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "bg-sky-600 text-white" : "border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200"}`}>
-                  <p className={`mb-1 text-[10px] font-semibold uppercase tracking-wider ${msg.role === "user" ? "text-sky-200/60" : "text-zinc-500"}`}>
-                    {msg.role === "user" ? "You" : "Chaos Copilot"}
+                <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-sky-600 text-white"
+                    : msg.role === "error"
+                      ? "border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300"
+                      : "border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200"
+                }`}>
+                  <p className={`mb-1 text-[10px] font-semibold uppercase tracking-wider ${
+                    msg.role === "user"
+                      ? "text-sky-200/60"
+                      : msg.role === "error"
+                        ? "text-red-500 dark:text-red-400"
+                        : "text-zinc-500"
+                  }`}>
+                    {msg.role === "user" ? "You" : msg.role === "error" ? "System" : "Chaos Copilot"}
                   </p>
                   <div className="whitespace-pre-wrap">{msg.content}</div>
                   <p className={`mt-1.5 text-[10px] ${msg.role === "user" ? "text-sky-200/40" : "text-zinc-600"}`}>

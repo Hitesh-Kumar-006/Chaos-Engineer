@@ -208,9 +208,30 @@ export default function StressTestSuite({
           onLogRef.current?.({ type: "stdout", message: `  \u26A1 ${line}` });
         }
 
-        /* ---- Execute user code ------------------------------------ */
+        /* ---- Execute user code with timeout guard ------------------ */
         if (codeExecutorRef.current) {
-          const exec = await codeExecutorRef.current();
+          const STRESS_ROUND_TIMEOUT_MS = 35_000;
+          let exec: Awaited<ReturnType<NonNullable<Props["codeExecutor"]>>>;
+          try {
+            exec = await Promise.race([
+              codeExecutorRef.current(),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`[StressRound] Execution timed out after ${STRESS_ROUND_TIMEOUT_MS / 1000}s`)), STRESS_ROUND_TIMEOUT_MS),
+              ),
+            ]);
+          } catch (timeoutErr) {
+            const msg = timeoutErr instanceof Error ? timeoutErr.message : "Execution timed out";
+            success = false;
+            error = msg;
+            summary.push(`TIMEOUT: ${msg}`);
+            onLogRef.current?.({ type: "stderr", message: `  TIMEOUT: ${msg}` });
+            /* Skip post-run chaos on timeout */
+            const latencyMs = performance.now() - t0;
+            const result: RoundResult = { round: roundIdx, disruptionType, latencyMs, success, error, summary };
+            onLogRef.current?.({ type: "stderr", message: `  ✗ Round ${roundIdx + 1} FAILED (${latencyMs.toFixed(0)}ms)` });
+            onLogRef.current?.({ type: "stdout", message: "" });
+            return result;
+          }
           summary.push(`Code: ${exec.success ? "OK" : "ERROR"} (${exec.latencyMs.toFixed(0)}ms)`);
           if (exec.stdout) {
             for (const line of exec.stdout.split("\n").filter(Boolean)) {

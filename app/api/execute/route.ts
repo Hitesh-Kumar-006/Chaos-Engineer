@@ -1,51 +1,163 @@
 import { NextResponse } from 'next/server';
+import { auditEnv, optionalEnv, envErrorResponse, EnvMissingError } from '@/lib/env';
+
+/** Supported language aliases mapped to OnlineCompiler.io compiler IDs. */
+const COMPILER_MAP: Record<string, string> = {
+  javascript: 'nodejs',
+  js: 'nodejs',
+  csharp: 'dotnet-csharp-9',
+  cs: 'dotnet-csharp-9',
+  'c#': 'dotnet-csharp-9',
+  java: 'openjdk-25',
+  python: 'python-3.14',
+  c: 'gcc-15',
+  cpp: 'g++-15',
+  rust: 'rust-1.93',
+  rs: 'rust-1.93',
+};
+
+/** Maximum time to wait for the upstream compiler before returning a timeout error. */
+const EXECUTION_TIMEOUT_MS = 30_000;
 
 export async function POST(request: Request) {
     try {
+        auditEnv();
+
+        /* Pre-flight: ensure ONLINE_COMPILER_API_KEY is available */
+        const apiKey = optionalEnv("ONLINE_COMPILER_API_KEY");
+        if (!apiKey) {
+            return NextResponse.json(
+                {
+                    error: "Service configuration error",
+                    detail: "OnlineCompiler.io API key is not configured. Server-side code execution is unavailable.",
+                    missingVar: "ONLINE_COMPILER_API_KEY",
+                    hint: "Set ONLINE_COMPILER_API_KEY in your .env.local file and restart the dev server.",
+                },
+                { status: 503 }
+            );
+        }
+
         const body = await request.json();
         const { language, code } = body;
 
-        // Normalize input to lowercase to prevent case-mismatch bugs
-        const lang = (language || '').toLowerCase();
-
-        let compilerId = 'nodejs'; // Default fallback
-
-        if (lang === 'javascript' || lang === 'js') {
-            compilerId = 'nodejs';
-        } else if (lang === 'csharp' || lang === 'cs' || lang === 'c#') {
-            compilerId = 'dotnet-csharp-9'; // Official C# .NET 9 engine identifier
-        } else if (lang === 'java') {
-            compilerId = 'openjdk-25';
-        } else if (lang === 'python') {
-            compilerId = 'python-3.14';
-        } else if (lang === 'c') {
-            compilerId = 'gcc-15';
-        } else if (lang === 'cpp') {
-            compilerId = 'g++-15';
-        } else if (lang === 'rust' || lang === 'rs') {
-            compilerId = 'rust-1.93';
+        if (!code || typeof code !== "string" || code.trim() === "") {
+            return NextResponse.json(
+                { error: "Missing required field: code (non-empty string)" },
+                { status: 400 }
+            );
         }
 
-        // Forward payload to the online execution provider using official endpoints
-        const response = await fetch('https://api.onlinecompiler.io/api/run-code-sync/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `${process.env.ONLINE_COMPILER_API_KEY || ''}`,
-            },
-            body: JSON.stringify({
-                compiler: compilerId,
-                code: code,
-            }),
-        });
+        const lang = (language || "").toLowerCase();
+        const compilerId = COMPILER_MAP[lang] || "nodejs";
+
+        /* ---- Timeout guard via AbortController ----------------------- */
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), EXECUTION_TIMEOUT_MS);
+
+        let response: Response;
+        try {
+            response = await fetch('https://api.onlinecompiler.io/api/run-code-sync/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': apiKey,
+                },
+                body: JSON.stringify({
+                    compiler: compilerId,
+                    code: code,
+                }),
+                signal: controller.signal,
+            });
+        } catch (fetchErr: unknown) {
+            clearTimeout(timeout);
+            if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
+                console.error(`[execute/compiler] Upstream timed out after ${EXECUTION_TIMEOUT_MS / 1000}s`);
+                return NextResponse.json(
+                    {
+                        error: "Code execution timed out.",
+                        detail: `The compiler did not respond within ${EXECUTION_TIMEOUT_MS / 1000} seconds. The code may contain an infinite loop or the service is overloaded.`,
+                        hint: "Check your code for infinite loops or reduce complexity, then retry.",
+                        stdout: "",
+                        stderr: `[TimeoutError] Execution exceeded ${EXECUTION_TIMEOUT_MS / 1000}s limit`,
+                        status: "timeout",
+                    },
+                    { status: 504 }
+                );
+            }
+            /* Network error (DNS, connection refused, etc.) */
+            const msg = fetchErr instanceof Error ? fetchErr.message : "Unknown network error";
+            console.error(`[execute/compiler] Network error: ${msg}`);
+            return NextResponse.json(
+                {
+                    error: "Code execution service unreachable.",
+                    detail: msg,
+                    stdout: "",
+                    stderr: `[NetworkError] ${msg}`,
+                    status: "error",
+                },
+                { status: 502 }
+            );
+        }
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            const status = response.status;
+            console.error(`[execute/compiler] Upstream returned ${status}`);
+
+            if (status === 401 || status === 403) {
+                return NextResponse.json(
+                    {
+                        error: "Code execution service authentication failed.",
+                        detail: "The ONLINE_COMPILER_API_KEY appears to be invalid or expired.",
+                        hint: "Verify your API key at onlinecompiler.io and update .env.local.",
+                    },
+                    { status: 503 }
+                );
+            }
+
+            /* Try to extract upstream error details for the client */
+            let upstreamError = "";
+            try {
+                const errData = await response.json();
+                upstreamError = errData.error || errData.message || "";
+            } catch { /* non-JSON body */ }
+
+            return NextResponse.json(
+                {
+                    error: `Code execution service returned ${status}.`,
+                    stdout: "",
+                    stderr: upstreamError || `[UpstreamError] Compiler returned HTTP ${status}`,
+                    status: "error",
+                },
+                { status: 502 }
+            );
+        }
 
         const data = await response.json();
 
-        return NextResponse.json(data);
+        /* ---- Normalise the response: ensure stdout/stderr fields exist */
+        const normalised = {
+            ...data,
+            output: data.output ?? data.stdout ?? "",
+            error: data.error ?? data.stderr ?? "",
+            status: data.status ?? (data.error || data.stderr ? "error" : "success"),
+        };
+
+        return NextResponse.json(normalised);
+
     } catch (error) {
-        console.error('Execution API Route Error:', error);
+        if (error instanceof EnvMissingError) {
+            return envErrorResponse(error);
+        }
+        const message = error instanceof Error ? error.message : "Unknown error";
+        console.error('[execute/compiler]', message);
         return NextResponse.json(
-            { error: 'Internal server error during code execution.' },
+            {
+                error: "Code execution service temporarily unavailable.",
+                stdout: "",
+                stderr: `[InternalError] ${message}`,
+                status: "error",
+            },
             { status: 500 }
         );
     }

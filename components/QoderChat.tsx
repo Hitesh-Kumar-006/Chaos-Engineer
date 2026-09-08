@@ -53,14 +53,40 @@ export default function QoderChat() {
                 body: JSON.stringify({ messages: updatedMessages }),
             });
 
-            const data = await res.json();
-            if (res.ok) {
-                setMessages([...updatedMessages, { role: 'assistant', content: data.content }]);
+            let data: Record<string, unknown> = {};
+            try { data = await res.json(); } catch { /* non-JSON body */ }
+
+            if (!res.ok) {
+                const missingVar = typeof data.missingVar === "string" ? data.missingVar : null;
+                const hint = typeof data.hint === "string" ? data.hint : null;
+                let errMsg: string;
+                if (res.status === 503 && missingVar) {
+                    errMsg = `The chat service is not configured. \`${missingVar}\` is missing. ${hint ?? "Set it in .env.local and restart the server."}`;
+                } else if (res.status === 502) {
+                    errMsg = "The AI model is temporarily overloaded. Please try again in a moment.";
+                } else if (res.status === 429) {
+                    errMsg = "Rate limit reached. Please wait a few seconds before sending another message.";
+                } else {
+                    errMsg = typeof data.error === "string" ? data.error : `Chat service returned HTTP ${res.status}.`;
+                }
+                setMessages([...updatedMessages, { role: 'assistant', content: `⚠️ ${errMsg}` }]);
             } else {
-                setMessages([...updatedMessages, { role: 'assistant', content: "⚠️ Error: Could not reach Qoder AI right now." }]);
+                const content = data.content ?? data.reply ?? "";
+                if (content) {
+                    setMessages([...updatedMessages, { role: 'assistant', content: String(content) }]);
+                } else {
+                    setMessages([...updatedMessages, { role: 'assistant', content: "⚠️ The AI returned an empty response. Please try rephrasing your question." }]);
+                }
             }
         } catch (err) {
-            setMessages([...updatedMessages, { role: 'assistant', content: "⚠️ Network error occurred." }]);
+            const detail = err instanceof Error ? err.message : "";
+            const isNetwork = detail.includes("fetch") || detail.includes("NetworkError") || detail.includes("Failed to fetch");
+            setMessages([...updatedMessages, {
+                role: 'assistant',
+                content: isNetwork
+                    ? "⚠️ Could not connect to the chat service. Check your internet connection or that the dev server is running."
+                    : `⚠️ Network error: ${detail || "An unexpected error occurred."}`
+            }]);
         } finally {
             setLoading(false);
         }

@@ -83,7 +83,8 @@ function defer<T>(fn: () => T): Promise<T> {
 function safeGet(key: string): string | null {
   try {
     return localStorage.getItem(key);
-  } catch {
+  } catch (err) {
+    console.warn(`[persistence] localStorage read blocked for "${key}":`, err);
     return null;
   }
 }
@@ -91,8 +92,17 @@ function safeGet(key: string): string | null {
 function safeSet(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
-  } catch {
-    /* Storage full or privacy mode - silently ignore */
+  } catch (err) {
+    /* Storage full, privacy mode, or sandboxed read-only env */
+    console.warn(`[persistence] localStorage write blocked for "${key}":`, err);
+  }
+}
+
+function safeRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch (err) {
+    console.warn(`[persistence] localStorage remove blocked for "${key}":`, err);
   }
 }
 
@@ -130,11 +140,7 @@ function loadHistorySync(): ChallengeHistoryEntry[] {
 /** Clear the entire challenge history. */
 export async function clearHistory(): Promise<void> {
   return defer(() => {
-    try {
-      localStorage.removeItem(KEYS.HISTORY);
-    } catch {
-      /* ignore */
-    }
+    safeRemove(KEYS.HISTORY);
   });
 }
 
@@ -213,11 +219,7 @@ function loadStressReportsSync(): StressTestRecord[] {
 /** Clear all saved stress test reports. */
 export async function clearStressReports(): Promise<void> {
   return defer(() => {
-    try {
-      localStorage.removeItem(KEYS.STRESS_REPORTS);
-    } catch {
-      /* ignore */
-    }
+    safeRemove(KEYS.STRESS_REPORTS);
   });
 }
 

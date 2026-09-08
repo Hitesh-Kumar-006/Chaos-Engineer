@@ -1,8 +1,16 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { QODER_SYSTEM_PROMPT } from "@/lib/ai-prompt";
+import { auditEnv, requireEnv, envErrorResponse, EnvMissingError } from "@/lib/env";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+/* Lazy-initialised Gemini client — avoids crashing at module load if the key is absent. */
+let _ai: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!_ai) {
+    _ai = new GoogleGenAI({ apiKey: requireEnv("GEMINI_API_KEY") });
+  }
+  return _ai;
+}
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -49,11 +57,13 @@ function buildProactivePrompt(context?: RequestBody["context"]): string {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "GEMINI_API_KEY environment variable is not configured" },
-        { status: 503 }
-      );
+    auditEnv();
+
+    /* Pre-flight: ensure GEMINI_API_KEY is available before any work */
+    try {
+      requireEnv("GEMINI_API_KEY");
+    } catch (e) {
+      return envErrorResponse(e);
     }
 
     const body = (await request.json()) as RequestBody;
@@ -72,12 +82,11 @@ export async function POST(request: NextRequest) {
       activeUserMessage = body.message || "";
       if (body.context) {
         const ctxLines: string[] = [];
-        
+
         if (body.context.language) {
           ctxLines.push(`[Active Editor Language: ${body.context.language}]`);
         }
         if (body.context.currentCode) {
-          // Include line numbers so the AI can easily reference specific lines like "line 4"
           const numberedCode = body.context.currentCode
             .split("\n")
             .map((line, idx) => `${idx + 1}: ${line}`)
@@ -119,6 +128,8 @@ export async function POST(request: NextRequest) {
       parts: [{ text: activeUserMessage }],
     });
 
+    const ai = getAI();
+
     const response = await ai.models.generateContent({
       model: "gemini-3.7-flash",
       contents: contents,
@@ -138,11 +149,13 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
+    if (error instanceof EnvMissingError) {
+      return envErrorResponse(error);
+    }
     const message = error instanceof Error ? error.message : "Internal server error";
-    console.error("[ai-chat-gemini]", message);
-
+    console.error("[ai-chat/gemini]", message);
     return NextResponse.json(
-      { error: message },
+      { error: "AI service temporarily unavailable. Please try again." },
       { status: 500 }
     );
   }

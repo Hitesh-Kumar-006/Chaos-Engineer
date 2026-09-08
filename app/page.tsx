@@ -20,6 +20,7 @@ import ChallengeResultsModal from "@/components/challenges/ChallengeResultsModal
 import { saveHistoryEntry, saveLastConfig, loadLastConfig, saveStressReport, type StressTestRecord } from "@/lib/persistence";
 import { useCopilotMonitor, type CopilotEvent } from "@/lib/hooks/useCopilotMonitor";
 import ToastContainer, { type Toast } from "@/components/ui/NotificationToast";
+import PaneErrorBoundary from "@/components/ui/PaneErrorBoundary";
 
 /* Language type — mirrors CodeEditor export */
 type EditorLanguage = "javascript" | "python" | "java" | "c" | "cpp" | "csharp";
@@ -70,6 +71,21 @@ executePipeline();`);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  /* ---- Execution timeouts ------------------------------------------ */
+  const BROWSER_EXEC_TIMEOUT_MS = 5_000;   // 5s for browser-side JS
+  const SERVER_EXEC_TIMEOUT_MS  = 30_000;  // 30s for server-side compilation
+
+  /** Race a promise against a timeout — returns structured error on timeout. */
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`[${label}] Execution timed out after ${ms / 1000}s`)), ms);
+      promise.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        (e) => { clearTimeout(timer); reject(e); },
+      );
+    });
+  }
+
   /* ---- Stress test code executor ---------------------------------- */
   const stressCodeExecutor = useCallback(async () => {
     const source = codeRef.current;
@@ -85,8 +101,8 @@ executePipeline();`);
       };
       try {
         const fn = new Function("console", source);
-        const result = fn(fakeConsole);
-        const stdout = logs.join("\n") + (result !== undefined ? (logs.length ? "\n" : "") + String(result) : "");
+        await withTimeout(Promise.resolve(fn(fakeConsole)), BROWSER_EXEC_TIMEOUT_MS, "JS");
+        const stdout = logs.join("\n") + (logs.length ? "" : "");
         return { stdout: stdout || "(no output)", stderr: "", success: true, latencyMs: performance.now() - t0 };
       } catch (err) {
         const errorType = err instanceof Error ? err.constructor.name : "UnknownError";
@@ -111,11 +127,15 @@ executePipeline();`);
       }
     } else {
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), SERVER_EXEC_TIMEOUT_MS);
         const res = await fetch("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ language, code: source }),
+          signal: controller.signal,
         });
+        clearTimeout(timer);
         if (!res.ok) throw new Error(`API error: ${res.status}`);
         const data = await res.json();
         const stdout: string = data.output ?? data.stdout ?? "";
@@ -129,7 +149,11 @@ executePipeline();`);
       } catch (err) {
         const errorType = err instanceof Error ? err.constructor.name : "UnknownError";
         const errorMsg = err instanceof Error ? err.message : String(err);
-        return { stdout: "", stderr: `[${errorType}] ${errorMsg}`, success: false, latencyMs: performance.now() - t0 };
+        const isTimeout = errorMsg.includes("timed out") || (err instanceof DOMException && err.name === "AbortError");
+        const stderr = isTimeout
+          ? `[TimeoutError] Server execution exceeded ${SERVER_EXEC_TIMEOUT_MS / 1000}s limit`
+          : `[${errorType}] ${errorMsg}`;
+        return { stdout: "", stderr, success: false, latencyMs: performance.now() - t0 };
       }
     }
   }, []);
@@ -165,7 +189,7 @@ executePipeline();`);
   /* ---- Code execution -------------------------------------------- */
   const executeCode = useCallback(async (source: string, language: EditorLanguage) => {
     if (language === "javascript") {
-      /* ---- Browser-based JS/TS execution ---- */
+      /* ---- Browser-based JS/TS execution with timeout ---- */
       const newLogs: LogEntry[] = [];
       try {
         const logs: string[] = [];
@@ -175,12 +199,9 @@ executePipeline();`);
           error: (...args: unknown[]) => logs.push("[error] " + args.map(String).join(" ")),
         };
         const fn = new Function("console", source);
-        const result = fn(fakeConsole);
+        await withTimeout(Promise.resolve(fn(fakeConsole)), BROWSER_EXEC_TIMEOUT_MS, "JS");
         for (const line of logs) {
           newLogs.push({ type: "stdout", message: line });
-        }
-        if (result !== undefined) {
-          newLogs.push({ type: "stdout", message: String(result) });
         }
         if (newLogs.length === 0) {
           newLogs.push({ type: "stdout", message: "(no output)" });
@@ -192,15 +213,10 @@ executePipeline();`);
         /* Parse stack trace to extract the line number within user code */
         let errorLine: string | null = null;
         if (err instanceof Error && err.stack) {
-          /* new Function() stacks reference "<anonymous>" — line is offset by the wrapper preamble.
-             We look for the first frame that contains a line/column reference. */
-          const frames = err.stack.split("\n").slice(1); // skip the Error message line
+          const frames = err.stack.split("\n").slice(1);
           for (const frame of frames) {
-            /* Match patterns like  "at <anonymous>:5:13"  or  "at eval (<anonymous>:5:13)" */
             const m = frame.match(/:(\d+):\d+/);
             if (m) {
-              /* Line 1 in the stack corresponds to the Function wrapper preamble;
-                 subtract 1 to map back to the user's source line number. */
               const raw = parseInt(m[1], 10);
               errorLine = String(raw > 1 ? raw - 1 : raw);
               break;
@@ -215,33 +231,34 @@ executePipeline();`);
         newLogs.push({ type: "stderr", message: formatted });
       }
       setConsoleLogs(newLogs);
-      setDiagnostics(null); // browser JS produces no server diagnostics
+      setDiagnostics(null);
     } else {
-      /* ---- Server-side execution via /api/execute ---- */
+      /* ---- Server-side execution via /api/execute with timeout ---- */
       setIsExecuting(true);
       const newLogs: LogEntry[] = [];
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), SERVER_EXEC_TIMEOUT_MS);
         const res = await fetch("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
             code: source,
-            /* Chaos Engine — current slider values */
             chaos: {
-              networkLag: chaosConfig.latencyJitterMs,  // ms
-              memoryBloat: chaosConfig.memoryLeakMb,    // MB
-              crashChance: chaosConfig.failureRate,     // %
-              freezeTime: chaosConfig.eventLoopBlockMs, // ms
+              networkLag: chaosConfig.latencyJitterMs,
+              memoryBloat: chaosConfig.memoryLeakMb,
+              crashChance: chaosConfig.failureRate,
+              freezeTime: chaosConfig.eventLoopBlockMs,
             },
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timer);
         if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
         const data = await res.json();
         setDiagnostics(data.diagnostics ?? null);
 
-        /* Map response fields — support both OnlineCompiler.io native
-           format (output/error) and our legacy format (stdout/stderr) */
         const stdout: string = data.output ?? data.stdout ?? "";
         const stderr: string = data.error ?? data.stderr ?? "";
 
@@ -262,10 +279,11 @@ executePipeline();`);
         setDiagnostics(null);
         const errorType = err instanceof Error ? err.constructor.name : "UnknownError";
         const errorMsg = err instanceof Error ? err.message : String(err);
-        newLogs.push({
-          type: "stderr",
-          message: `[${errorType}] ${errorMsg}`,
-        });
+        const isTimeout = errorMsg.includes("timed out") || (err instanceof DOMException && err.name === "AbortError");
+        const message = isTimeout
+          ? `[TimeoutError] Server execution exceeded ${SERVER_EXEC_TIMEOUT_MS / 1000}s limit. Check for infinite loops.`
+          : `[${errorType}] ${errorMsg}`;
+        newLogs.push({ type: "stderr", message });
       } finally {
         setIsExecuting(false);
       }
@@ -303,12 +321,14 @@ executePipeline();`);
       <Header />
 
       {/* SRE Copilot -- floating bottom-right widget with live editor code and language context */}
-      <SreCopilotDrawer 
-        chaosConfig={chaosConfig} 
-        currentCode={code} 
-        language={lang}
-        externalInsight={latestInsight}
-      />
+      <PaneErrorBoundary label="Chat Panel">
+        <SreCopilotDrawer 
+          chaosConfig={chaosConfig} 
+          currentCode={code} 
+          language={lang}
+          externalInsight={latestInsight}
+        />
+      </PaneErrorBoundary>
 
       <AutoAssessmentModal
         open={assessmentOpen}
@@ -386,51 +406,60 @@ executePipeline();`);
               </p>
 
               {/* Mode Selector & Difficulty pills */}
-              <ChallengeHeader
-                challengeActive={challengeActive}
-                onChallengeStop={() => setChallengeActive(false)}
-                onDifficultyChange={handleDifficultyChange}
-                onStartChallenge={(language, starterCode, title) => {
-                  setLang(language as EditorLanguage);
-                  setCode(starterCode);
-                  setDifficulty("moderate");
-                  handleDifficultyChange("moderate");
-                  setChallengeActive(true);
-                  setLastChallengeLang(language);
-                  setLastChallengeTitle(title);
-                  const cats = inferCategories(title);
-                  setChallengeCategories(cats);
-                }}
-              />
+              <PaneErrorBoundary label="Challenge Selector">
+                <ChallengeHeader
+                  challengeActive={challengeActive}
+                  onChallengeStop={() => setChallengeActive(false)}
+                  onDifficultyChange={handleDifficultyChange}
+                  onStartChallenge={(language, starterCode, title) => {
+                    setLang(language as EditorLanguage);
+                    setCode(starterCode);
+                    setDifficulty("moderate");
+                    handleDifficultyChange("moderate");
+                    setChallengeActive(true);
+                    setLastChallengeLang(language);
+                    setLastChallengeTitle(title);
+                    const cats = inferCategories(title);
+                    setChallengeCategories(cats);
+                  }}
+                />
+              </PaneErrorBoundary>
 
               {/* Configuration workspace (dropdown + 4 sliders) directly below */}
-              <ChaosControlDrawer
-                config={chaosConfig}
-                onConfigChange={setChaosConfig}
-              />
+              <PaneErrorBoundary label="Chaos Matrix">
+                <ChaosControlDrawer
+                  config={chaosConfig}
+                  onConfigChange={setChaosConfig}
+                />
+              </PaneErrorBoundary>
 
-              <CodeEditor
-                language={lang}
-                blameLines={blameLines}
-                onLanguageChange={(l) => {
-                  setLang(l);
-                }}
-                value={code}
-                onChange={(val) => {
-                  setCode(val);
-                }}
-              />
+              <PaneErrorBoundary label="Code Editor">
+                <CodeEditor
+                  language={lang}
+                  blameLines={blameLines}
+                  onLanguageChange={(l) => {
+                    setLang(l);
+                  }}
+                  value={code}
+                  onChange={(val) => {
+                    setCode(val);
+                  }}
+                />
+              </PaneErrorBoundary>
             </div>
 
             {/* ──── Right pane: Telemetry > Stress Suite > Console ──── */}
             {/* mt-[5.5rem] offsets the Welcome heading height so MetricsCharts aligns with ChallengeHeader */}
             <div className="mt-[5.5rem] flex flex-col gap-4 xl:col-span-5">
-              <MetricsCharts
-                latestReport={latestReport}
-                chaosConfig={chaosConfig}
-              />
+              <PaneErrorBoundary label="Metrics Dashboard">
+                <MetricsCharts
+                  latestReport={latestReport}
+                  chaosConfig={chaosConfig}
+                />
+              </PaneErrorBoundary>
 
-              <StressTestSuite
+              <PaneErrorBoundary label="Stress Test Suite">
+                <StressTestSuite
                 config={chaosConfig}
                 difficulty={difficulty}
                 codeExecutor={stressCodeExecutor}
@@ -481,32 +510,35 @@ executePipeline();`);
                   ]);
                 }}
               />
+              </PaneErrorBoundary>
 
               {/* Run / Stop bar + Console */}
-              <div>
-                {/* Run/Stop controls */}
-                <div className="mb-2 flex items-center gap-3">
-                  <button
-                    onClick={handleRun}
-                    disabled={isExecuting || (mode === "auto_chaos" && challengeActive && resultsOpen)}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow transition hover:bg-emerald-500 disabled:opacity-40"
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M4 2l10 6-10 6z" />
-                    </svg>
-                    Run
-                  </button>
-                </div>
+              <PaneErrorBoundary label="Console Output">
+                <div>
+                  {/* Run/Stop controls */}
+                  <div className="mb-2 flex items-center gap-3">
+                    <button
+                      onClick={handleRun}
+                      disabled={isExecuting || (mode === "auto_chaos" && challengeActive && resultsOpen)}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow transition hover:bg-emerald-500 disabled:opacity-40"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M4 2l10 6-10 6z" />
+                      </svg>
+                      Run
+                    </button>
+                  </div>
 
-                <ConsoleOutput
-                  logs={consoleLogs}
-                  diagnostics={diagnostics}
-                  onClear={() => {
-                    setConsoleLogs([]);
-                    setDiagnostics(null);
-                  }}
-                />
-              </div>
+                  <ConsoleOutput
+                    logs={consoleLogs}
+                    diagnostics={diagnostics}
+                    onClear={() => {
+                      setConsoleLogs([]);
+                      setDiagnostics(null);
+                    }}
+                  />
+                </div>
+              </PaneErrorBoundary>
             </div>
           </div>
         </div>
