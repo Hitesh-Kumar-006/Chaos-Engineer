@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qoder - AI-Powered Chaos Engineering IDE</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f0f1a;color:#e0e0e0;overflow:hidden;height:100vh}
+.deck{width:100vw;height:100vh;position:relative}
+.slide{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:60px 80px;opacity:0;pointer-events:none;transition:opacity .4s ease,transform .4s ease;transform:translateX(30px)}
+.slide.active{opacity:1;pointer-events:auto;transform:translateX(0)}
+.slide.prev{opacity:0;transform:translateX(-30px)}
+h1{font-size:2.8em;color:#42affa;margin-bottom:.3em;font-weight:700}
+h2{font-size:2em;color:#42affa;margin-bottom:.5em;font-weight:600}
+h3{font-size:1.2em;color:#888;margin-bottom:1em;font-weight:400}
+ul{list-style:none;padding-left:0}
+ul li{padding:.5em 0 .5em 1.5em;position:relative;font-size:1.1em;line-height:1.6}
+ul li::before{content:"▸";position:absolute;left:0;color:#42affa}
+.hl{color:#42affa;font-weight:600}
+.team{margin-top:2em;font-size:1.1em;line-height:2}
+.check{color:#42affa;font-weight:bold}
+.center{text-align:center}
+.center h1,.center h2,.center h3{text-align:center}
+.center ul{display:inline-block;text-align:left}
+.nav{position:fixed;bottom:30px;right:40px;display:flex;gap:12px;z-index:10}
+.nav button{background:rgba(66,175,250,.2);border:1px solid rgba(66,175,250,.4);color:#42affa;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;transition:background .2s}
+.nav button:hover{background:rgba(66,175,250,.4)}
+.nav button:disabled{opacity:.3;cursor:default}
+.counter{position:fixed;bottom:35px;left:40px;color:#666;font-size:14px;z-index:10}
+.tag{display:inline-block;background:rgba(66,175,250,.15);border:1px solid rgba(66,175,250,.3);border-radius:20px;padding:4px 14px;font-size:.85em;margin:4px}
+.cta{font-size:1.5em;color:#42affa;font-weight:700;margin-top:1.5em}
+.subtitle-line{font-size:1.3em;color:#888;margin-bottom:.3em}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- SLIDE 1: Title -->
+<div class="slide center active">
+  <h1 style="font-size:3.5em;margin-bottom:0">Qoder</h1>
+  <h2 style="color:#ccc;font-weight:400;margin-top:.2em">Chaos Engineering Meets AI</h2>
+  <p class="subtitle-line">Building Resilient Code Before Production Breaks It</p>
+  <div class="team">
+    <p><strong>Team Leader:</strong> M. Mashood Ur Rehman Khan</p>
+    <p><strong>Team Member:</strong> Hitesh Kumar</p>
+  </div>
+</div>
+
+<!-- SLIDE 2: The Problem -->
+<div class="slide">
+  <h2>The Problem: Testing's Blind Spot</h2>
+  <ul>
+    <li>Unit tests, integration tests, and E2E tests assume <span class="hl">ideal conditions</span></li>
+    <li>Production failures are intermittent: API timeouts, 503 errors, memory spikes, network jitter</li>
+    <li>Developers discover bugs <strong>after</strong> deployment — when users are already impacted</li>
+    <li>Junior developers and CS students lack safe environments to practice chaos engineering</li>
+    <li>Engineering teams deploying AI integrations face unpredictable model latency and token limits</li>
+  </ul>
+</div>
+
+<!-- SLIDE 3: Who Pays the Price -->
+<div class="slide">
+  <h2>Who Pays the Price?</h2>
+  <ul>
+    <li><strong>University CS Students:</strong> Graduate without exposure to fault-tolerant design patterns</li>
+    <li><strong>Junior Developers:</strong> Learn resilience the hard way — through production outages</li>
+    <li><strong>Engineering Teams:</strong> Ship AI integrations that fail unpredictably under load</li>
+    <li><strong>End Users:</strong> Experience crashes, timeouts, and data loss</li>
+    <li><strong>Business Impact:</strong> Downtime costs, reputation damage, emergency hotfixes</li>
+  </ul>
+</div>
+
+<!-- SLIDE 4: The Solution -->
+<div class="slide">
+  <h2>Qoder: Chaos Engineering, Reimagined</h2>
+  <ul>
+    <li>Interactive IDE with a <span class="hl">Chaos Matrix</span> for real-time fault injection</li>
+    <li><span class="hl">Chaos Copilot</span> powered by Google Gemini for instant code analysis and explainability</li>
+    <li>Simulate disasters before they happen:
+      <br><span class="tag">Network Lag</span><span class="tag">Memory Bloat</span><span class="tag">Crash Rates</span><span class="tag">Event-Loop Blocking</span>
+    </li>
+    <li>Practice resilience patterns in a safe, educational environment</li>
+    <li>Stress-test logic against production-like chaos before deployment</li>
+  </ul>
+</div>
+
+<!-- SLIDE 5: Audience -->
+<div class="slide">
+  <h2>Who Is Qoder For?</h2>
+  <ul>
+    <li><strong>CS Students:</strong> Learn resilience patterns — retry logic, circuit breakers, graceful degradation — through hands-on challenges</li>
+    <li><strong>Junior Developers:</strong> Stress-test code against realistic production failures without risking real systems</li>
+    <li><strong>Engineering Teams:</strong> Validate AI integrations under unpredictable API behavior</li>
+    <li><strong>DevOps &amp; SRE Teams:</strong> Generate incident post-mortem telemetry and track MTBF improvements</li>
+    <li><strong>Educators:</strong> Teach chaos engineering concepts with interactive, gamified challenges</li>
+  </ul>
+</div>
+
+<!-- SLIDE 6: The Need -->
+<div class="slide">
+  <h2>Why Now? Shift Left on Resilience</h2>
+  <ul>
+    <li>Traditional testing catches logic bugs, not system failures</li>
+    <li>Chaos engineering has been a Netflix/Amazon practice — too complex for everyday developers</li>
+    <li>AI integrations introduce new failure modes: model drift, token exhaustion, hallucination-induced crashes</li>
+    <li>Proactive error handling is always cheaper than reactive hotfixes</li>
+    <li>Industry demand for resilient systems is growing faster than developer training</li>
+  </ul>
+</div>
+
+<!-- SLIDE 7: The Impact -->
+<div class="slide">
+  <h2>Measurable Outcomes</h2>
+  <ul>
+    <li><strong>Higher System Reliability:</strong> Code is stress-tested against chaos before deployment</li>
+    <li><strong>Proactive Error Handling:</strong> Developers write retry logic, fallbacks, and circuit breakers by default</li>
+    <li><strong>Automated Post-Mortem Telemetry:</strong> Every stress test generates exportable incident reports</li>
+    <li><strong>Faster Learning Curve:</strong> Students gain production-grade intuition in hours, not years</li>
+    <li><strong>Reduced Downtime:</strong> Teams catch resilience gaps before users do</li>
+  </ul>
+</div>
+
+<!-- SLIDE 8: Tech Stack -->
+<div class="slide">
+  <h2>Innovation &amp; Technology</h2>
+  <ul>
+    <li><strong>Next.js 15.5.24:</strong> Server-side rendering, API routes, production build pipeline</li>
+    <li><strong>Google Gemini API:</strong> Powers the Chaos Copilot for instant code analysis and explainability</li>
+    <li><strong>Custom Telemetry Engine:</strong> SLA grades (A–F), MTBF, latency percentiles (P50, P95, P99)</li>
+    <li><strong>Chaos Injection Engine:</strong> Real-time fault injection for network lag, memory bloat, crash rates</li>
+    <li><strong>CodeMirror 6:</strong> In-browser editor with blame highlighting for failed iterations</li>
+  </ul>
+</div>
+
+<!-- SLIDE 9: What Has Been Built -->
+<div class="slide">
+  <h2>Feasibility — Working Implementation</h2>
+  <ul>
+    <li><span class="check">✓</span> Fully functional algorithm validators (e.g., robust configuration validator)</li>
+    <li><span class="check">✓</span> Working production build pipeline (<code style="background:rgba(66,175,250,.2);padding:2px 6px;border-radius:3px">npm run prod</code>)</li>
+    <li><span class="check">✓</span> Live chaos fault-injection simulation with real-time console output</li>
+    <li><span class="check">✓</span> Exportable JSON incident post-mortem telemetry reports</li>
+    <li><span class="check">✓</span> Interactive 5-round resilience challenges (Mild / Moderate / Chaos)</li>
+    <li><span class="check">✓</span> AI-powered Chaos Copilot with contextual analysis and suggestions</li>
+  </ul>
+</div>
+
+<!-- SLIDE 10: Demo Flow -->
+<div class="slide">
+  <h2>See It in Action</h2>
+  <ul>
+    <li><strong>1. Challenge Mode:</strong> Select a resilience challenge (e.g., "Retry Logic Under Network Jitter")</li>
+    <li><strong>2. Chaos Matrix:</strong> Adjust sliders for latency, memory, crash rate, and event-loop blocking</li>
+    <li><strong>3. Stress Test:</strong> Run 5 rounds — fix code on failure, retry, and improve</li>
+    <li><strong>4. Post-Mortem Report:</strong> Export JSON telemetry with SLA grade, MTBF, and latency percentiles</li>
+    <li><strong>5. Chaos Copilot:</strong> Ask Gemini for an architectural breakdown of what failed and how to fix it</li>
+  </ul>
+</div>
+
+<!-- SLIDE 11: Competitive Advantage -->
+<div class="slide">
+  <h2>Why Qoder Stands Out</h2>
+  <ul>
+    <li><strong>Educational Focus:</strong> Gamified challenges make chaos engineering accessible to students</li>
+    <li><strong>AI-Powered Guidance:</strong> Gemini provides instant explainability, not just failure reports</li>
+    <li><strong>Developer-Centric:</strong> Runs in-browser — no infrastructure setup required</li>
+    <li><strong>Actionable Telemetry:</strong> Exportable post-mortem reports, not just dashboards</li>
+    <li><strong>Real Code Execution:</strong> Tests actual user code, not simulated scenarios</li>
+  </ul>
+</div>
+
+<!-- SLIDE 12: Roadmap -->
+<div class="slide">
+  <h2>What's Next for Qoder?</h2>
+  <ul>
+    <li><strong>Multi-Language Support:</strong> Expand chaos injection to Python, Java, C++, Go</li>
+    <li><strong>Team Collaboration:</strong> Share challenges, post-mortem reports, and resilience scores</li>
+    <li><strong>CI/CD Integration:</strong> Run chaos tests as part of your deployment pipeline</li>
+    <li><strong>Custom Chaos Scenarios:</strong> Let users define their own failure modes</li>
+    <li><strong>Leaderboards:</strong> Compete on resilience scores across universities and teams</li>
+  </ul>
+</div>
+
+<!-- SLIDE 13: Closing -->
+<div class="slide center">
+  <h1 style="font-size:3.5em">Qoder</h1>
+  <h2 style="color:#ccc;font-weight:400">Build Resilient Code, Before Production Breaks It</h2>
+  <div style="margin-top:2em;font-size:1.1em;line-height:2.2">
+    <p>Chaos engineering is no longer just for Netflix and Amazon</p>
+    <p>Every developer deserves a safe space to break their code</p>
+    <p class="cta">Try it. Break it. Fix it. Ship it.</p>
+  </div>
+  <p style="margin-top:2em;color:#888;font-size:1.1em">Thank you — Questions?</p>
+</div>
+
+</div>
+
+<div class="counter" id="counter"></div>
+<div class="nav">
+  <button id="prevBtn" onclick="navigate(-1)">← Prev</button>
+  <button id="nextBtn" onclick="navigate(1)">Next →</button>
+</div>
+
+<script>
+let current=0;
+const slides=document.querySelectorAll('.slide');
+const counter=document.getElementById('counter');
+const prevBtn=document.getElementById('prevBtn');
+const nextBtn=document.getElementById('nextBtn');
+
+function show(idx){
+  slides.forEach((s,i)=>{
+    s.classList.remove('active','prev');
+    if(i===idx)s.classList.add('active');
+    else if(i<idx)s.classList.add('prev');
+  });
+  counter.textContent=(idx+1)+' / '+slides.length;
+  prevBtn.disabled=idx===0;
+  nextBtn.disabled=idx===slides.length-1;
+}
+
+function navigate(dir){
+  const next=current+dir;
+  if(next>=0&&next<slides.length){current=next;show(current)}
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' ')navigate(1);
+  if(e.key==='ArrowLeft')navigate(-1);
+  if(e.key==='Home'){current=0;show(0)}
+  if(e.key==='End'){current=slides.length-1;show(current)}
+});
+
+show(0);
+</script>
+</body>
+</html>
