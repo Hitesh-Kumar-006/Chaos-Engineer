@@ -363,9 +363,6 @@ export default function ChallengeHeader({ onStartChallenge, challengeActive = fa
 
                   <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4">
                     <div className="mb-3 flex items-center gap-2">
-                      <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-sky-600 dark:text-sky-400">
-                        Moderate
-                      </span>
                       <span className="text-[11px] font-semibold text-zinc-800 dark:text-zinc-200">
                         {SCENARIO_POOL[autoLang][scenarioIdx].title}
                       </span>
