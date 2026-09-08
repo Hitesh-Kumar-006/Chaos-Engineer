@@ -260,9 +260,9 @@ function blockEventLoop(ms: number): void {
  * Allocate (and hold a reference to) a buffer of `mb` megabytes.
  * Returns the buffer so the caller can release it when done.
  */
-function allocateMemory(mb: number): Buffer | null {
+function allocateMemory(mb: number): Uint8Array | null {
   if (mb <= 0) return null;
-  return Buffer.alloc(mb * 1024 * 1024, 0x42);
+  return new Uint8Array(mb * 1024 * 1024);
 }
 
 /* ------------------------------------------------------------------ */

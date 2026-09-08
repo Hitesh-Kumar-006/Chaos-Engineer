@@ -12,7 +12,7 @@ import ChaosControlDrawer from "@/components/editor/ChaosControlDrawer";
 import StressTestSuite from "@/components/editor/StressTestSuite";
 import type { StressReport } from "@/components/editor/StressTestSuite";
 import MetricsCharts from "@/components/telemetry/MetricsCharts";
-import ConsoleOutput, { type LogEntry, type Diagnostics } from "@/components/telemetry/ConsoleOutput";
+import ConsoleOutput, { type LogEntry, type Diagnostics, type ChaosReportTelemetry } from "@/components/telemetry/ConsoleOutput";
 import SreCopilotDrawer from "@/components/chat/SreCopilotDrawer";
 import { DEFAULT_CONFIG, DIFFICULTY_PRESETS, type ChaosConfig } from "@/lib/execution/chaos";
 import { evaluateCode, inferCategories, TIER_PRESETS, type EvaluationResult, type PatternCategory } from "@/lib/challenges/evaluateCode";
@@ -21,6 +21,7 @@ import { saveHistoryEntry, saveLastConfig, loadLastConfig, saveStressReport, typ
 import { useCopilotMonitor, type CopilotEvent } from "@/lib/hooks/useCopilotMonitor";
 import ToastContainer, { type Toast } from "@/components/ui/NotificationToast";
 import PaneErrorBoundary from "@/components/ui/PaneErrorBoundary";
+import ChaosStatusBanner, { type ChaosReport } from "@/components/ui/ChaosStatusBanner";
 
 /* Language type — mirrors CodeEditor export */
 type EditorLanguage = "javascript" | "python" | "java" | "c" | "cpp" | "csharp";
@@ -55,6 +56,7 @@ export default function Home() {
   const [latestInsight, setLatestInsight] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [blameLines, setBlameLines] = useState<number[]>([]);
+  const [lastChaosReport, setLastChaosReport] = useState<ChaosReport | null>(null);
   const [code, setCode] = useState(`function executePipeline() {
     console.log("System initialized.");
 }
@@ -132,12 +134,36 @@ executePipeline();`);
         const res = await fetch("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language, code: source }),
+          body: JSON.stringify({
+            language,
+            code: source,
+            chaos: {
+              networkLag: chaosConfigRef.current.latencyJitterMs,
+              memoryBloat: chaosConfigRef.current.memoryLeakMb,
+              crashChance: chaosConfigRef.current.failureRate,
+              freezeTime: chaosConfigRef.current.eventLoopBlockMs,
+              activePreset: chaosConfigRef.current.activePreset,
+            },
+          }),
           signal: controller.signal,
         });
         clearTimeout(timer);
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+        /* Handle chaos fault responses from the backend */
+        if (!res.ok) {
+          let faultData: Record<string, unknown> = {};
+          try { faultData = await res.json(); } catch { /* non-JSON */ }
+          if (faultData.status === "fault") {
+            const stderr = (faultData.stderr as string) || `[ChaosFault] ${faultData.detail}`;
+            const rpt = faultData.chaosReport as ChaosReport | undefined;
+            if (rpt) setLastChaosReport(rpt);
+            return { stdout: "", stderr, success: false, latencyMs: performance.now() - t0 };
+          }
+          throw new Error(`API error: ${res.status}`);
+        }
         const data = await res.json();
+        /* Capture chaosReport from successful stress round responses */
+        if (data.chaosReport) setLastChaosReport(data.chaosReport as ChaosReport);
         const stdout: string = data.output ?? data.stdout ?? "";
         const stderr: string = data.error ?? data.stderr ?? "";
         return {
@@ -232,6 +258,7 @@ executePipeline();`);
       }
       setConsoleLogs(newLogs);
       setDiagnostics(null);
+      setLastChaosReport(null);
     } else {
       /* ---- Server-side execution via /api/execute with timeout ---- */
       setIsExecuting(true);
@@ -250,14 +277,36 @@ executePipeline();`);
               memoryBloat: chaosConfig.memoryLeakMb,
               crashChance: chaosConfig.failureRate,
               freezeTime: chaosConfig.eventLoopBlockMs,
+              activePreset: chaosConfig.activePreset,
             },
           }),
           signal: controller.signal,
         });
         clearTimeout(timer);
-        if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+
+        /* Handle chaos fault (503 with status:"fault") gracefully */
+        if (!res.ok) {
+          let faultData: Record<string, unknown> = {};
+          try { faultData = await res.json(); } catch { /* non-JSON */ }
+          if (faultData.status === "fault") {
+            const stderr = (faultData.stderr as string) || `[ChaosFault] ${faultData.detail}`;
+            newLogs.push({ type: "stderr", message: stderr });
+            const rpt = faultData.chaosReport as ChaosReport | undefined;
+            if (rpt) setLastChaosReport(rpt);
+            setConsoleLogs(newLogs);
+            return;
+          }
+          throw new Error(`API error: ${res.status} ${res.statusText}`);
+        }
         const data = await res.json();
         setDiagnostics(data.diagnostics ?? null);
+
+        /* Capture chaos report from the response if present */
+        if (data.chaosReport) {
+          setLastChaosReport(data.chaosReport as ChaosReport);
+        } else {
+          setLastChaosReport(null);
+        }
 
         const stdout: string = data.output ?? data.stdout ?? "";
         const stderr: string = data.error ?? data.stderr ?? "";
@@ -330,14 +379,17 @@ executePipeline();`);
         />
       </PaneErrorBoundary>
 
-      <AutoAssessmentModal
-        open={assessmentOpen}
-        onClose={() => setAssessmentOpen(false)}
-      />
+      <PaneErrorBoundary label="Assessment Modal" onReset={() => setAssessmentOpen(false)}>
+        <AutoAssessmentModal
+          open={assessmentOpen}
+          onClose={() => setAssessmentOpen(false)}
+        />
+      </PaneErrorBoundary>
 
-      <ChallengeResultsModal
-        open={resultsOpen}
-        result={evalResult}
+      <PaneErrorBoundary label="Results Modal" onReset={() => { setResultsOpen(false); setEvalResult(null); }}>
+        <ChallengeResultsModal
+          open={resultsOpen}
+          result={evalResult}
         onSubmit={() => {
           if (!evalResult) return;
           const preset = TIER_PRESETS[evalResult.tier];
@@ -388,6 +440,7 @@ executePipeline();`);
           saveLastConfig(DEFAULT_CONFIG);
         }}
       />
+      </PaneErrorBoundary>
 
       {/* Dashboard body */}
       <main className="flex-1 px-6 py-8">
@@ -425,15 +478,31 @@ executePipeline();`);
                 />
               </PaneErrorBoundary>
 
+              {/* Chaos status banner: shows active mode, injection state, and last-run telemetry */}
+              <ChaosStatusBanner
+                config={chaosConfig}
+                difficulty={difficulty}
+                lastReport={lastChaosReport}
+                onResetChaos={() => {
+                  setChaosConfig(DEFAULT_CONFIG);
+                  setLastChaosReport(null);
+                  saveLastConfig(DEFAULT_CONFIG);
+                }}
+                onRetryExecution={() => {
+                  setLastChaosReport(null);
+                  executeCode(code, lang);
+                }}
+              />
+
               {/* Configuration workspace (dropdown + 4 sliders) directly below */}
-              <PaneErrorBoundary label="Chaos Matrix">
+              <PaneErrorBoundary label="Chaos Matrix" onReset={() => { setChaosConfig(DEFAULT_CONFIG); saveLastConfig(DEFAULT_CONFIG); setLastChaosReport(null); }}>
                 <ChaosControlDrawer
                   config={chaosConfig}
                   onConfigChange={setChaosConfig}
                 />
               </PaneErrorBoundary>
 
-              <PaneErrorBoundary label="Code Editor">
+              <PaneErrorBoundary label="Code Editor" onReset={() => { setCode(`function executePipeline() {\n    console.log("System initialized.");\n}\nexecutePipeline();`); setBlameLines([]); }}>
                 <CodeEditor
                   language={lang}
                   blameLines={blameLines}
@@ -451,14 +520,14 @@ executePipeline();`);
             {/* ──── Right pane: Telemetry > Stress Suite > Console ──── */}
             {/* mt-[5.5rem] offsets the Welcome heading height so MetricsCharts aligns with ChallengeHeader */}
             <div className="mt-[5.5rem] flex flex-col gap-4 xl:col-span-5">
-              <PaneErrorBoundary label="Metrics Dashboard">
+              <PaneErrorBoundary label="Metrics Dashboard" onReset={() => setLatestReport(null)}>
                 <MetricsCharts
                   latestReport={latestReport}
                   chaosConfig={chaosConfig}
                 />
               </PaneErrorBoundary>
 
-              <PaneErrorBoundary label="Stress Test Suite">
+              <PaneErrorBoundary label="Stress Test Suite" onReset={() => { setLatestReport(null); setConsoleLogs([]); setLastChaosReport(null); }}>
                 <StressTestSuite
                 config={chaosConfig}
                 difficulty={difficulty}
@@ -513,7 +582,7 @@ executePipeline();`);
               </PaneErrorBoundary>
 
               {/* Run / Stop bar + Console */}
-              <PaneErrorBoundary label="Console Output">
+              <PaneErrorBoundary label="Console Output" onReset={() => { setConsoleLogs([]); setDiagnostics(null); setLastChaosReport(null); }}>
                 <div>
                   {/* Run/Stop controls */}
                   <div className="mb-2 flex items-center gap-3">
@@ -532,9 +601,11 @@ executePipeline();`);
                   <ConsoleOutput
                     logs={consoleLogs}
                     diagnostics={diagnostics}
+                    chaosReport={lastChaosReport ? { faulted: lastChaosReport.faulted, injected: lastChaosReport.injected, addedLatencyMs: lastChaosReport.addedLatencyMs } : null}
                     onClear={() => {
                       setConsoleLogs([]);
                       setDiagnostics(null);
+                      setLastChaosReport(null);
                     }}
                   />
                 </div>

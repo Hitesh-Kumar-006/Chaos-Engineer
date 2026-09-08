@@ -36,6 +36,12 @@ function friendlyError(status: number, data: Record<string, unknown>): string {
   const hint = typeof data.hint === "string" ? data.hint : null;
   const missingVar = typeof data.missingVar === "string" ? data.missingVar : null;
 
+  /* Chaos fault injection: the backend intentionally returned 503 to simulate an outage */
+  if (data.status === "fault" || data.preset) {
+    const preset = typeof data.preset === "string" ? data.preset : "custom";
+    return `Chaos fault triggered (${preset} preset): ${detail ?? "A simulated failure was injected by the Chaos Matrix."}`;
+  }
+
   if (status === 503) {
     if (missingVar) {
       return `The Copilot service is not configured yet. The \`${missingVar}\` environment variable is missing.\n\n${hint ?? "Ask your administrator to set it in .env.local and restart the server."}`;
@@ -132,7 +138,18 @@ export default function SreCopilotDrawer({ chaosConfig, currentCode, language, e
 
         const response = await fetch("/api/ai-chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(chaosConfig ? {
+              "x-chaos-config": btoa(JSON.stringify({
+                networkLag: chaosConfig.latencyJitterMs,
+                memoryBloat: chaosConfig.memoryLeakMb,
+                crashChance: chaosConfig.failureRate,
+                freezeTime: chaosConfig.eventLoopBlockMs,
+                activePreset: chaosConfig.activePreset,
+              })),
+            } : {}),
+          },
           body: JSON.stringify({
             message: userText,
             history,
