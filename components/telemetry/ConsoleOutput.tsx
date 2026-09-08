@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 /* ------------------------------------------------------------------ */
 
 export interface LogEntry {
-  type: "stdout" | "stderr";
+  type: "stdout" | "stderr" | "stdin";
   message: string;
   timestamp?: Date;
 }

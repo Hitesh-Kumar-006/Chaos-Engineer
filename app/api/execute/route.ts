@@ -32,7 +32,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { language, code } = body;
+        const { language, code, stdin } = body;
 
         if (!code || typeof code !== "string" || code.trim() === "") {
             return NextResponse.json(
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
             response = await fetch('https://api.onlinecompiler.io/api/run-code-sync/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': apiKey },
-                body: JSON.stringify({ compiler: compilerId, code: code }),
+                body: JSON.stringify({ compiler: compilerId, code: code, ...(typeof stdin === "string" && stdin ? { stdin } : {}) }),
                 signal: controller.signal,
             });
         } catch (fetchErr: unknown) {

@@ -13,6 +13,7 @@ import StressTestSuite from "@/components/editor/StressTestSuite";
 import type { StressReport } from "@/components/editor/StressTestSuite";
 import MetricsCharts from "@/components/telemetry/MetricsCharts";
 import ConsoleOutput, { type LogEntry, type Diagnostics, type ChaosReportTelemetry } from "@/components/telemetry/ConsoleOutput";
+import InteractiveConsole from "@/components/ui/InteractiveConsole";
 import SreCopilotDrawer from "@/components/chat/SreCopilotDrawer";
 import { DEFAULT_CONFIG, DIFFICULTY_PRESETS, type ChaosConfig } from "@/lib/execution/chaos";
 import { evaluateCode, inferCategories, TIER_PRESETS, type EvaluationResult, type PatternCategory } from "@/lib/challenges/evaluateCode";
@@ -68,6 +69,13 @@ executePipeline();`);
   const langRef = useRef(lang);
   codeRef.current = code;
   langRef.current = lang;
+  const stdinLinesRef = useRef<string[]>([]);
+
+  /* ---- stdin handler: accumulates user input and adds to console logs */
+  const handleStdin = useCallback((text: string) => {
+    stdinLinesRef.current.push(text);
+    setConsoleLogs((prev) => [...prev, { type: "stdin" as const, message: text }]);
+  }, []);
 
   /* ---- Toast management -------------------------------------------- */
   const dismissToast = useCallback((id: string) => {
@@ -220,9 +228,16 @@ executePipeline();`);
 
   /* ---- Code execution -------------------------------------------- */
   const executeCode = useCallback(async (source: string, language: EditorLanguage) => {
+    const pendingStdin = [...stdinLinesRef.current];
+    stdinLinesRef.current = [];
+
     if (language === "javascript") {
       /* ---- Browser-based JS/TS execution with timeout ---- */
       const newLogs: LogEntry[] = [];
+      /* Preserve any existing stdin entries already in the log */
+      for (const prev of consoleLogs) {
+        if (prev.type === "stdin") newLogs.push(prev);
+      }
       try {
         const logs: string[] = [];
         const fakeConsole = {
@@ -230,8 +245,10 @@ executePipeline();`);
           warn: (...args: unknown[]) => logs.push("[warn] " + args.map(String).join(" ")),
           error: (...args: unknown[]) => logs.push("[error] " + args.map(String).join(" ")),
         };
-        const fn = new Function("console", source);
-        await withTimeout(Promise.resolve(fn(fakeConsole)), BROWSER_EXEC_TIMEOUT_MS, "JS");
+        const stdinQueue = [...pendingStdin];
+        const readline = () => stdinQueue.shift() ?? "";
+        const fn = new Function("console", "readline", source);
+        await withTimeout(Promise.resolve(fn(fakeConsole, readline)), BROWSER_EXEC_TIMEOUT_MS, "JS");
         for (const line of logs) {
           newLogs.push({ type: "stdout", message: line });
         }
@@ -269,6 +286,10 @@ executePipeline();`);
       /* ---- Server-side execution via /api/execute with timeout ---- */
       setIsExecuting(true);
       const newLogs: LogEntry[] = [];
+      /* Preserve any existing stdin entries already in the log */
+      for (const prev of consoleLogs) {
+        if (prev.type === "stdin") newLogs.push(prev);
+      }
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), SERVER_EXEC_TIMEOUT_MS);
@@ -278,6 +299,7 @@ executePipeline();`);
           body: JSON.stringify({
             language,
             code: source,
+            stdin: pendingStdin.join("\n"),
             chaos: {
               networkLag: chaosConfig.latencyJitterMs,
               memoryBloat: chaosConfig.memoryLeakMb,
@@ -344,7 +366,7 @@ executePipeline();`);
       }
       setConsoleLogs(newLogs);
     }
-  }, [chaosConfig]);
+  }, [chaosConfig, consoleLogs]);
 
   /* ---- Run button handler (intercepts auto-chaos) ----------------- */
   const handleRun = useCallback(() => {
@@ -607,14 +629,17 @@ executePipeline();`);
                     </button>
                   </div>
 
-                  <ConsoleOutput
+                  <InteractiveConsole
                     logs={consoleLogs}
                     diagnostics={diagnostics}
                     chaosReport={lastChaosReport ? { faulted: lastChaosReport.faulted, injected: lastChaosReport.injected, addedLatencyMs: lastChaosReport.addedLatencyMs } : null}
+                    disabled={isExecuting}
+                    onStdin={handleStdin}
                     onClear={() => {
                       setConsoleLogs([]);
                       setDiagnostics(null);
                       setLastChaosReport(null);
+                      stdinLinesRef.current = [];
                     }}
                   />
                 </div>
