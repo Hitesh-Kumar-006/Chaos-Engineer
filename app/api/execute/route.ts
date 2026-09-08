@@ -10,7 +10,8 @@ const COMPILER_MAP: Record<string, string> = {
   javascript: 'nodejs', js: 'nodejs',
   csharp: 'dotnet-csharp-9', cs: 'dotnet-csharp-9', 'c#': 'dotnet-csharp-9',
   java: 'openjdk-25', python: 'python-3.14',
-  c: 'gcc-15', cpp: 'g++-15', rust: 'rust-1.93', rs: 'rust-1.93',
+  c: 'gcc-15', cpp: 'g++-15', 'c++': 'g++-15',
+  rust: 'rust-1.93', rs: 'rust-1.93',
 };
 
 /** Maximum time to wait for the upstream compiler before returning a timeout error. */
@@ -42,7 +43,18 @@ export async function POST(request: Request) {
         }
 
         const lang = (language || "").toLowerCase();
-        const compilerId = COMPILER_MAP[lang] || "nodejs";
+        const compilerId = COMPILER_MAP[lang];
+
+        if (!compilerId) {
+            return NextResponse.json(
+                {
+                    error: "Unsupported language",
+                    detail: `Language "${language}" is not supported.`,
+                    supported: Object.keys(COMPILER_MAP).filter((k) => !k.includes("#") && !k.includes("+")),
+                },
+                { status: 400 },
+            );
+        }
 
         /* ---- Chaos injection: pre-execution phase -------------------- */
         const chaosCfg = extractChaosConfig(body as Record<string, unknown>, request.headers.get("x-chaos-config"));
