@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "next-themes";
 import CodeMirror from "@uiw/react-codemirror";
 import { Decoration, EditorView } from "@codemirror/view";
@@ -188,8 +188,14 @@ export default function CodeEditor({
   minHeight = "420px",
 }: Props) {
   const [lang, setLang] = useState<EditorLanguage>(language);
-  const extension = getExtension(lang);
-  const blameExt = blameExtension(blameLines ?? []);
+
+  /* Sync internal language state whenever the parent prop changes */
+  useEffect(() => {
+    setLang(language);
+  }, [language]);
+
+  const extension = useMemo(() => getExtension(lang), [lang]);
+  const blameExt = useMemo(() => blameExtension(blameLines ?? []), [blameLines]);
   const { resolvedTheme } = useTheme();
 
   return (
